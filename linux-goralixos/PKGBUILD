@@ -228,7 +228,7 @@ fi
 
 ## List of goralixos schedulers
 case "$_cpusched" in
-    goralixos) # goralixos Scheduler (Sched-ext + BORE + Cachy Sauce)
+    goralixos) # Goralixos Scheduler (Sched-ext + BORE + GoralixOS Sauce)
         source+=("${_patchsource}/sched/0001-sched-ext.patch"
                  "${_patchsource}/sched/0001-bore-cachy-ext.patch");;
     bore) ## BORE Scheduler
