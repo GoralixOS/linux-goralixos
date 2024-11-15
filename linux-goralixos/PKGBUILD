@@ -1,0 +1,137 @@
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+# Modified for GoralixOS
+
+pkgbase=linux-goralixos
+pkgver=6.11.8
+pkgrel=2
+pkgdesc="Linux kernel for GoralixOS with optimizations"
+url="https://github.com/GoralixOS/linux-goralixos"
+arch=(x86_64)
+license=(GPL2)
+makedepends=(
+  bc
+  cpio
+  gettext
+  libelf
+  pahole
+  perl
+  python
+  tar
+  xz
+  clang
+  llvm
+  lld
+  # Optional for docs
+  graphviz
+  imagemagick
+  python-sphinx
+  python-yaml
+  texlive-latexextra
+)
+options=(!debug !strip)
+_patchsource="https://raw.githubusercontent.com/cachyos/kernel-patches/master/${pkgver%%.*}"
+_srcname=linux-${pkgver%.*}
+_srctag=v${pkgver%.*}-${pkgver##*.}
+
+source=(
+  https://cdn.kernel.org/pub/linux/kernel/v${pkgver%%.*}.x/${_srcname}.tar.{xz,sign}
+  config
+  ${_patchsource}/all/0001-cachyos-base-all.patch
+  ${_patchsource}/sched/0001-sched-ext.patch
+  ${_patchsource}/sched/0001-bore-cachy-ext.patch
+)
+sha256sums=(
+  'aee8a844fe152420bece70ffae8525b9b23089aa4da31fa32f30e1859bf93c3d'
+  'SKIP'
+  'SKIP'
+  'SKIP'
+  'SKIP'
+)
+
+# Flags for optimized compilation
+BUILD_FLAGS=(
+  CC=clang
+  LD=ld.lld
+  LLVM=1
+  LLVM_IAS=1
+  KCFLAGS="-march=native -O2"
+)
+
+export KBUILD_BUILD_HOST="goralixos"
+export KBUILD_BUILD_USER="linux-goralixos"
+export KBUILD_BUILD_TIMESTAMP="$(date -Ru${SOURCE_DATE_EPOCH:+d @$SOURCE_DATE_EPOCH})"
+
+prepare() {
+  cd "$_srcname"
+
+  echo "Preparing kernel sources..."
+  for src in "${source[@]}"; do
+    src="${src%%::*}"
+    src="${src##*/}"
+    [[ $src = *.patch ]] || continue
+    echo "Applying patch $src..."
+    patch -Np1 < "../$src" || { echo "Failed to apply patch: $src"; exit 1; }
+  done
+
+  echo "Copying configuration..."
+  cp ../config .config
+  make olddefconfig
+
+  echo "Kernel version prepared: $(make -s kernelrelease)"
+}
+
+build() {
+  cd "$_srcname"
+  echo "Building kernel and modules..."
+  make "${BUILD_FLAGS[@]}" all
+  make -C tools/bpf/bpftool vmlinux.h feature-clang-bpf-co-re=1
+  make "${BUILD_FLAGS[@]}" htmldocs
+}
+
+_package() {
+  cd "$_srcname"
+  local modulesdir="$pkgdir/usr/lib/modules/$(make -s kernelrelease)"
+
+  echo "Installing kernel image and modules..."
+  install -Dm644 "$(make -s image_name)" "$modulesdir/vmlinuz"
+  echo "$pkgbase" > "$modulesdir/pkgbase"
+
+  ZSTD_CLEVEL=19 make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 \
+    DEPMOD=/doesnt/exist modules_install
+
+  # Remove unnecessary build links
+  rm -r "$modulesdir/build"
+}
+
+_package-headers() {
+  cd "$_srcname"
+  local builddir="$pkgdir/usr/lib/modules/$(make -s kernelrelease)/build"
+
+  echo "Installing kernel headers..."
+  install -Dm644 .config Makefile Module.symvers System.map \
+    localversion.* version vmlinux "$builddir/"
+  cp -a scripts include arch/x86/include "$builddir/"
+}
+
+_package-docs() {
+  cd "$_srcname"
+  local docdir="$pkgdir/usr/share/doc/$pkgbase"
+
+  echo "Installing documentation..."
+  install -d "$docdir"
+  cp -r Documentation/* "$docdir/"
+}
+
+pkgname=(
+  "$pkgbase"
+  "$pkgbase-headers"
+  "$pkgbase-docs"
+)
+for _p in "${pkgname[@]}"; do
+  eval "package_$_p() {
+    $(declare -f "_package${_p#$pkgbase}")
+    _package${_p#$pkgbase}
+  }"
+done
+
+# vim: set ts=8 sts=2 sw=2 et:
